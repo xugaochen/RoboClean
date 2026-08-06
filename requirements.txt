@@ -1,0 +1,24 @@
+# Core dependencies
+numpy>=1.21.0
+pyarrow>=10.0.0
+pandas>=1.3.0
+tqdm>=4.62.0
+
+# Visualization
+matplotlib>=3.4.0
+seaborn>=0.11.0
+plotly>=5.3.0
+
+# Data processing
+scipy>=1.7.0
+Pillow>=8.3.0
+
+# Optional: for video processing
+opencv-python>=4.5.0
+av>=8.0.0
+
+# Web interface
+Flask>=2.0.0
+
+# CLI
+rich>=10.0.0

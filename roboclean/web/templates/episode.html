@@ -1,0 +1,262 @@
+{% extends "base.html" %}
+
+{% block title %}Episode {{ episode_idx }} - RoboClean{% endblock %}
+
+{% block content %}
+<h1>📹 Episode {{ episode_idx }}</h1>
+
+<div class="info-box">
+    <strong>Episode 索引:</strong> {{ episode_idx }}<br>
+    <strong>帧数:</strong> {{ episode_info.get('length', '未知') }}<br>
+    <strong>任务:</strong> {{ episode_info.get('task', '未知') }}
+</div>
+
+<div class="nav-buttons">
+    <a href="/" class="nav-btn">🏠 返回首页</a>
+    {% if episode_idx > 0 %}
+    <a href="/episode/{{ episode_idx - 1 }}" class="nav-btn">◀ 上一个 Episode</a>
+    {% else %}
+    <button class="nav-btn" disabled>◀ 上一个 Episode</button>
+    {% endif %}
+    {% if episode_idx < total_episodes - 1 %}
+    <a href="/episode/{{ episode_idx + 1 }}" class="nav-btn">下一个 Episode ▶</a>
+    {% else %}
+    <button class="nav-btn" disabled>下一个 Episode ▶</button>
+    {% endif %}
+</div>
+
+{% if video_files %}
+<h2>🎥 多视角视频播放 (共 {{ video_files|length }} 个摄像头)</h2>
+
+<div class="nav-buttons">
+    <button class="nav-btn" onclick="playAllVideos()" style="background: #28a745;">▶️ 同时播放所有视频</button>
+    <button class="nav-btn" onclick="pauseAllVideos()" style="background: #dc3545;">⏸️ 同时暂停所有视频</button>
+    <button class="nav-btn" onclick="playCleanedSequence()" style="background: #17a2b8;">🎬 播放清洗后序列</button>
+    <button class="nav-btn" onclick="stopCleanedSequence()" style="background: #ffc107; color: #000;">⏹️ 停止序列播放</button>
+    <button class="nav-btn" onclick="resetAllVideos()" style="background: #6c757d;">🔄 重置所有视频</button>
+</div>
+
+{% if frame_timestamps %}
+<div class="info-box" style="margin: 20px 0;">
+    <strong>帧导航器：</strong> 共 {{ frame_timestamps|length }} 帧<br>
+    <label for="frame-selector">跳转到帧：</label>
+    <input type="range" id="frame-selector" min="0" max="{{ frame_timestamps|length - 1 }}" value="0" style="width: 60%;">
+    <span id="frame-display">帧 0 (时间: {{ "%.3f"|format(frame_timestamps[0]) if frame_timestamps else 0 }}s)</span>
+</div>
+{% endif %}
+
+<div class="video-grid">
+    {% for video_key, video_info in video_files.items() %}
+    <div class="video-card">
+        <h3>📷 {{ video_key }}</h3>
+        <video
+            id="video-{{ loop.index }}"
+            class="video-player"
+            controls
+            preload="metadata"
+            {% if video_info.type == "chunk" %}
+            data-start-time="{{ video_info.start_time }}"
+            data-end-time="{{ video_info.end_time }}"
+            {% endif %}
+        >
+            <source src="/video/{{ video_info.path }}{% if video_info.type == 'chunk' %}#t={{ video_info.start_time }},{{ video_info.end_time }}{% endif %}" type="video/mp4">
+            您的浏览器不支持 HTML5 视频。
+        </video>
+        {% if video_info.type == "chunk" %}
+        <p style="font-size: 12px; color: #666; margin-top: 5px;">
+            时间范围: {{ "%.1f"|format(video_info.start_time) }}s - {{ "%.1f"|format(video_info.end_time) }}s
+        </p>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+
+<script>
+// Frame timestamps data
+const frameTimestamps = {{ frame_timestamps|tojson if frame_timestamps else '[]' }};
+
+// Cleaned sequence playback state
+let cleanedSequenceInterval = null;
+let currentFrameIndex = 0;
+
+// 同步播放所有视频
+function playAllVideos() {
+    const videos = document.querySelectorAll('.video-player');
+    videos.forEach((video, index) => {
+        // For v3.0 videos, set start time
+        const startTime = video.getAttribute('data-start-time');
+        if (startTime && video.currentTime < parseFloat(startTime)) {
+            video.currentTime = parseFloat(startTime);
+        }
+        video.play();
+    });
+}
+
+// 同步暂停所有视频
+function pauseAllVideos() {
+    const videos = document.querySelectorAll('.video-player');
+    videos.forEach(video => {
+        video.pause();
+    });
+}
+
+// Play cleaned sequence (jump through frames according to timestamps)
+function playCleanedSequence() {
+    if (frameTimestamps.length === 0) {
+        alert('没有清洗后的时间戳数据');
+        return;
+    }
+    
+    if (cleanedSequenceInterval) {
+        clearInterval(cleanedSequenceInterval);
+    }
+    
+    currentFrameIndex = 0;
+    const fps = 30; // Default FPS
+    const frameDuration = 1000 / fps; // Duration per frame in ms
+    
+    // Jump to first frame
+    jumpToFrame(0);
+    
+    // Auto-play through frames
+    cleanedSequenceInterval = setInterval(() => {
+        currentFrameIndex++;
+        
+        if (currentFrameIndex >= frameTimestamps.length) {
+            // Reached end, stop
+            stopCleanedSequence();
+            return;
+        }
+        
+        jumpToFrame(currentFrameIndex);
+        updateFrameSelector(currentFrameIndex);
+    }, frameDuration);
+}
+
+// Stop cleaned sequence playback
+function stopCleanedSequence() {
+    if (cleanedSequenceInterval) {
+        clearInterval(cleanedSequenceInterval);
+        cleanedSequenceInterval = null;
+    }
+    
+    // Pause all videos
+    pauseAllVideos();
+}
+
+// Update frame selector slider
+function updateFrameSelector(frameIndex) {
+    const frameSelector = document.getElementById('frame-selector');
+    if (frameSelector) {
+        frameSelector.value = frameIndex;
+    }
+}
+
+// 重置所有视频
+function resetAllVideos() {
+    // Stop cleaned sequence playback
+    stopCleanedSequence();
+    
+    const videos = document.querySelectorAll('.video-player');
+    videos.forEach(video => {
+        const startTime = video.getAttribute('data-start-time');
+        if (startTime) {
+            video.currentTime = parseFloat(startTime);
+        } else {
+            video.currentTime = 0;
+        }
+        video.pause();
+    });
+
+    // Reset frame selector
+    const frameSelector = document.getElementById('frame-selector');
+    if (frameSelector) {
+        frameSelector.value = 0;
+        updateFrameDisplay(0);
+    }
+    
+    currentFrameIndex = 0;
+}
+
+// Jump to specific frame
+function jumpToFrame(frameIndex) {
+    if (frameIndex < 0 || frameIndex >= frameTimestamps.length) return;
+
+    const timestamp = frameTimestamps[frameIndex];
+    const videos = document.querySelectorAll('.video-player');
+
+    videos.forEach(video => {
+        const startTime = video.getAttribute('data-start-time');
+        const endTime = video.getAttribute('data-end-time');
+
+        // For v3.0 videos, add episode start time offset
+        let targetTime = timestamp;
+        if (startTime) {
+            targetTime = parseFloat(startTime) + timestamp;
+        }
+
+        // Check if within valid range
+        if (endTime && targetTime > parseFloat(endTime)) {
+            console.warn('Frame time exceeds video end time');
+            return;
+        }
+
+        video.currentTime = targetTime;
+    });
+
+    updateFrameDisplay(frameIndex);
+}
+
+// Update frame display
+function updateFrameDisplay(frameIndex) {
+    const display = document.getElementById('frame-display');
+    if (display && frameTimestamps.length > 0) {
+        const timestamp = frameTimestamps[frameIndex];
+        display.textContent = `帧 ${frameIndex} (时间: ${timestamp.toFixed(3)}s)`;
+    }
+}
+
+// 监听视频结束事件,自动停止在结束时间
+document.addEventListener('DOMContentLoaded', function() {
+    const videos = document.querySelectorAll('.video-player');
+    videos.forEach(video => {
+        const endTime = video.getAttribute('data-end-time');
+        if (endTime) {
+            video.addEventListener('timeupdate', function() {
+                if (video.currentTime >= parseFloat(endTime)) {
+                    video.pause();
+                }
+            });
+        }
+    });
+
+    // Frame selector event listener
+    const frameSelector = document.getElementById('frame-selector');
+    if (frameSelector) {
+        frameSelector.addEventListener('input', function() {
+            const frameIndex = parseInt(this.value);
+            
+            // Stop cleaned sequence playback when user manually selects a frame
+            if (cleanedSequenceInterval) {
+                stopCleanedSequence();
+            }
+            
+            jumpToFrame(frameIndex);
+            currentFrameIndex = frameIndex;
+        });
+    }
+});
+</script>
+
+{% else %}
+<div class="error-box">
+    <h3>⚠️ 未找到视频文件</h3>
+    <p>该数据集可能使用图像序列而非视频文件,或者视频路径格式不支持。</p>
+    <p>请检查数据集结构:</p>
+    <ul>
+        <li>LeRobot v2.1 视频: videos/chunk-XXX/observation.images.XXX/episode_XXXXXX.mp4</li>
+        <li>LeRobot v3.0 视频: videos/observation.images.XXX/chunk-XXX/file-XXX.mp4</li>
+    </ul>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block title %}错误 - RoboClean{% endblock %}
+
+{% block content %}
+<h1>❌ 出错了</h1>
+<div class="error-box">
+    <h3>错误信息:</h3>
+    <p>{{ error }}</p>
+</div>
+<div class="nav-buttons">
+    <a href="/" class="nav-btn">🏠 返回首页</a>
+</div>
+{% endblock %}

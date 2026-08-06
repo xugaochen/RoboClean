@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}RoboClean - 输入数据集路径{% endblock %}
+
+{% block content %}
+<h1>🤖 RoboClean - LeRobot 数据集可视化</h1>
+
+<div class="input-form">
+    <form action="/load" method="POST">
+        <div class="input-group">
+            <label for="dataset_path">数据集路径:</label>
+            <input
+                type="text"
+                id="dataset_path"
+                name="dataset_path"
+                placeholder="例如: demo_data/empty_table_reset/empty_table_reset_lerobot_v21_video"
+                required
+            >
+        </div>
+
+        <button type="submit" class="submit-btn">📂 加载数据集</button>
+    </form>
+
+    <div class="example-paths">
+        <strong>示例路径:</strong>
+        <code>demo_data/empty_table_reset/empty_table_reset_lerobot_v21_video</code>
+        <code>demo_data/empty_table_reset/empty_table_reset_lerobot_v30</code>
+        <code>/absolute/path/to/your/lerobot/dataset</code>
+    </div>
+</div>
+{% endblock %}

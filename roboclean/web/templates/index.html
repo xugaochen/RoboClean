@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}RoboClean - 数据集概览{% endblock %}
+
+{% block content %}
+<h1>🤖 RoboClean - 数据集可视化</h1>
+
+<div class="nav-buttons">
+    <a href="/?input=true" class="nav-btn" style="background: #764ba2;">🔄 重新选择数据集</a>
+</div>
+
+<div class="info-box">
+    <strong>数据集路径:</strong> {{ dataset_path }}<br>
+    <strong>LeRobot 版本:</strong> {{ dataset_info.get('codebase_version', '未知') }}<br>
+    <strong>机器人:</strong> {{ dataset_info.get('robot_type', '未知') }}<br>
+    <strong>任务:</strong> {{ dataset_info.get('task', '未知') }}
+</div>
+
+<div class="stats">
+    <div class="stat-card">
+        <div class="stat-number">{{ total_episodes }}</div>
+        <div class="stat-label">Episodes 总数</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ total_frames }}</div>
+        <div class="stat-label">Frames 总数</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ "%.1f"|format(total_frames / total_episodes if total_episodes > 0 else 0) }}</div>
+        <div class="stat-label">平均 Frames/Episode</div>
+    </div>
+</div>
+
+<h2>📹 点击 Episode 查看视频</h2>
+<div class="episode-list">
+    {% for ep_idx, length in episode_lengths.items() %}
+    <a href="/episode/{{ ep_idx }}" class="episode-btn">
+        Episode {{ ep_idx }}<br>
+        <small>{{ length }} frames</small>
+    </a>
+    {% endfor %}
+</div>
+{% endblock %}
