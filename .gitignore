@@ -63,3 +63,4 @@ logs/
 *.zip
 
 lerobot/
+tmp/
