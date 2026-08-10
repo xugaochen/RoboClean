@@ -345,31 +345,15 @@ class DataCleaner:
     def _rewrite_indices(
         self, table: pa.Table, episode_index: int, global_start: int, fps: float
     ) -> pa.Table:
-        """Rewrite index columns after cleaning, preserving original timestamps for video sync."""
+        """Update episode_index and global index after cleaning, preserving original timestamps.
+
+        Note: We keep original timestamp and frame_index values unchanged to maintain
+        video synchronization without needing to update episode metadata.
+        """
         length = table.num_rows
 
-        # Save original timestamp and frame_index for video synchronization
-        original_timestamp = table['timestamp'].to_numpy()
-        original_frame_index = table['frame_index'].to_numpy()
-
-        # Add original timestamp as a new column for video playback
-        if 'original_timestamp' not in table.column_names:
-            table = table.append_column(
-                'original_timestamp',
-                pa.array(original_timestamp, type=pa.float32())
-            )
-
-        if 'original_frame_index' not in table.column_names:
-            table = table.append_column(
-                'original_frame_index',
-                pa.array(original_frame_index, type=pa.int64())
-            )
-
-        # Rewrite indices for the cleaned dataset
-        frame_index = np.arange(length, dtype=np.int64)
-
-        table = self._replace_column(table, "frame_index", frame_index)
-        table = self._replace_column(table, "timestamp", (frame_index / fps).astype(np.float32))
+        # Keep original timestamp and frame_index unchanged for video sync
+        # Only update episode_index and global index
         table = self._replace_column(table, "episode_index", np.full(length, episode_index, dtype=np.int64))
         table = self._replace_column(
             table, "index", np.arange(global_start, global_start + length, dtype=np.int64)

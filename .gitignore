@@ -61,3 +61,5 @@ logs/
 # Distribution
 *.tar.gz
 *.zip
+
+lerobot/

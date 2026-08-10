@@ -3,11 +3,20 @@
 {% block title %}Episode {{ episode_idx }} - RoboClean{% endblock %}
 
 {% block content %}
+<div class="warning-box" style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; padding: 10px; margin-bottom: 20px;">
+    <strong>⚠️ 注意：</strong> 删除帧功能会直接修改原始数据，无法撤销！请谨慎操作。
+</div>
+
 <h1>📹 Episode {{ episode_idx }}</h1>
 
 <div class="info-box">
     <strong>Episode 索引:</strong> {{ episode_idx }}<br>
-    <strong>帧数:</strong> {{ episode_info.get('length', '未知') }}<br>
+    <strong>清洗后帧数:</strong> {{ cleaned_frame_count }} 帧<br>
+    {% if original_frame_count != cleaned_frame_count %}
+    <strong>原视频帧数:</strong> {{ original_frame_count }} 帧 <span style="color: #28a745;">(已清洗 {{ original_frame_count - cleaned_frame_count }} 帧)</span><br>
+    {% else %}
+    <strong>原视频帧数:</strong> {{ original_frame_count }} 帧 <span style="color: #6c757d;">(未清洗)</span><br>
+    {% endif %}
     <strong>任务:</strong> {{ episode_info.get('task', '未知') }}
 </div>
 
@@ -28,20 +37,31 @@
 {% if video_files %}
 <h2>🎥 多视角视频播放 (共 {{ video_files|length }} 个摄像头)</h2>
 
-<div class="nav-buttons">
-    <button class="nav-btn" onclick="playAllVideos()" style="background: #28a745;">▶️ 同时播放所有视频</button>
-    <button class="nav-btn" onclick="pauseAllVideos()" style="background: #dc3545;">⏸️ 同时暂停所有视频</button>
-    <button class="nav-btn" onclick="playCleanedSequence()" style="background: #17a2b8;">🎬 播放清洗后序列</button>
-    <button class="nav-btn" onclick="stopCleanedSequence()" style="background: #ffc107; color: #000;">⏹️ 停止序列播放</button>
-    <button class="nav-btn" onclick="resetAllVideos()" style="background: #6c757d;">🔄 重置所有视频</button>
+<div class="nav-buttons" style="display: flex; align-items: center; gap: 10px;">
+    <!-- 主要功能：清洗后序列播放 -->
+    <button id="cleaned-play-pause-btn" class="nav-btn" onclick="toggleCleanedSequence()" style="background: #28a745; font-size: 16px; padding: 10px 20px;">▶️ 播放清洗后序列</button>
+    <button class="nav-btn" onclick="resetAllVideos()" style="background: #6c757d; font-size: 16px; padding: 10px 20px;">🔄 重置视频</button>
+    
+    <!-- 次要功能：原视频播放，放在右边不显眼 -->
+    <div style="margin-left: auto; display: flex; gap: 5px;">
+        <button id="play-pause-btn" class="nav-btn" onclick="togglePlayPause()" style="background: #6c757d; font-size: 12px; padding: 5px 10px;">▶️ 原视频</button>
+    </div>
 </div>
 
 {% if frame_timestamps %}
 <div class="info-box" style="margin: 20px 0;">
     <strong>帧导航器：</strong> 共 {{ frame_timestamps|length }} 帧<br>
     <label for="frame-selector">跳转到帧：</label>
-    <input type="range" id="frame-selector" min="0" max="{{ frame_timestamps|length - 1 }}" value="0" style="width: 60%;">
+    <input type="range" id="frame-selector" min="0" max="{{ frame_timestamps|length - 1 }}" value="0" style="width: 40%;">
     <span id="frame-display">帧 0 (时间: {{ "%.3f"|format(frame_timestamps[0]) if frame_timestamps else 0 }}s)</span>
+</div>
+
+<div class="info-box" style="margin: 20px 0; background: #f8f9fa;">
+    <strong>批量删除帧范围：</strong><br>
+    <button class="nav-btn" onclick="markStartFrame()" style="background: #17a2b8; font-size: 14px;">📍 标记起始帧</button>
+    <button class="nav-btn" onclick="markEndFrame()" style="background: #17a2b8; font-size: 14px;">📍 标记结束帧</button>
+    <span id="range-display" style="margin-left: 10px;">未选择范围</span>
+    <button class="nav-btn" onclick="deleteFrameRange()" style="background: #dc3545; margin-left: 10px; font-size: 14px;">🗑️ 删除选中范围</button>
 </div>
 {% endif %}
 
@@ -78,6 +98,59 @@ const frameTimestamps = {{ frame_timestamps|tojson if frame_timestamps else '[]'
 // Cleaned sequence playback state
 let cleanedSequenceInterval = null;
 let currentFrameIndex = 0;
+
+// Frame range selection state
+let startFrameIndex = null;
+let endFrameIndex = null;
+
+// Play state tracking
+let isPlaying = false;
+
+// Toggle play/pause for all videos
+function togglePlayPause() {
+    const btn = document.getElementById('play-pause-btn');
+    const videos = document.querySelectorAll('.video-player');
+    
+    if (isPlaying) {
+        // Pause all videos
+        videos.forEach(video => {
+            video.pause();
+        });
+        btn.textContent = '▶️ 原视频';
+        btn.style.background = '#6c757d';
+        isPlaying = false;
+    } else {
+        // Play all videos
+        videos.forEach((video, index) => {
+            // For v3.0 videos, set start time
+            const startTime = video.getAttribute('data-start-time');
+            if (startTime && video.currentTime < parseFloat(startTime)) {
+                video.currentTime = parseFloat(startTime);
+            }
+            video.play();
+        });
+        btn.textContent = '⏸️ 原视频';
+        btn.style.background = '#dc3545';
+        isPlaying = true;
+    }
+}
+
+// Toggle cleaned sequence play/pause
+function toggleCleanedSequence() {
+    const btn = document.getElementById('cleaned-play-pause-btn');
+    
+    if (cleanedSequenceInterval) {
+        // Stop cleaned sequence playback
+        stopCleanedSequence();
+        btn.textContent = '▶️ 播放清洗后序列';
+        btn.style.background = '#28a745';
+    } else {
+        // Start cleaned sequence playback
+        playCleanedSequence();
+        btn.textContent = '⏸️ 暂停清洗后序列';
+        btn.style.background = '#dc3545';
+    }
+}
 
 // 同步播放所有视频
 function playAllVideos() {
@@ -118,6 +191,13 @@ function playCleanedSequence() {
     // Jump to first frame
     jumpToFrame(0);
     
+    // Update button state
+    const btn = document.getElementById('cleaned-play-pause-btn');
+    if (btn) {
+        btn.textContent = '⏸️ 暂停清洗后序列';
+        btn.style.background = '#dc3545';
+    }
+    
     // Auto-play through frames
     cleanedSequenceInterval = setInterval(() => {
         currentFrameIndex++;
@@ -130,6 +210,8 @@ function playCleanedSequence() {
         
         jumpToFrame(currentFrameIndex);
         updateFrameSelector(currentFrameIndex);
+        
+        // Chart marker is automatically updated by jumpToFrame
     }, frameDuration);
 }
 
@@ -142,6 +224,13 @@ function stopCleanedSequence() {
     
     // Pause all videos
     pauseAllVideos();
+    
+    // Update button state
+    const btn = document.getElementById('cleaned-play-pause-btn');
+    if (btn) {
+        btn.textContent = '▶️ 播放清洗后序列';
+        btn.style.background = '#28a745';
+    }
 }
 
 // Update frame selector slider
@@ -176,6 +265,21 @@ function resetAllVideos() {
     }
     
     currentFrameIndex = 0;
+    
+    // Reset play button state
+    const playPauseBtn = document.getElementById('play-pause-btn');
+    if (playPauseBtn) {
+        playPauseBtn.textContent = '▶️ 原视频';
+        playPauseBtn.style.background = '#6c757d';
+        isPlaying = false;
+    }
+    
+    // Reset cleaned sequence button state
+    const cleanedPlayPauseBtn = document.getElementById('cleaned-play-pause-btn');
+    if (cleanedPlayPauseBtn) {
+        cleanedPlayPauseBtn.textContent = '▶️ 播放清洗后序列';
+        cleanedPlayPauseBtn.style.background = '#28a745';
+    }
 }
 
 // Jump to specific frame
@@ -205,6 +309,9 @@ function jumpToFrame(frameIndex) {
     });
 
     updateFrameDisplay(frameIndex);
+    
+    // Update chart marker position
+    updateChartMarker(frameIndex);
 }
 
 // Update frame display
@@ -216,6 +323,127 @@ function updateFrameDisplay(frameIndex) {
     }
 }
 
+// Delete current frame
+function deleteCurrentFrame() {
+    if (frameTimestamps.length === 0) {
+        alert('没有帧数据');
+        return;
+    }
+    
+    const frameIndex = currentFrameIndex;
+    
+    // Confirm deletion
+    if (!confirm(`确定要删除帧 ${frameIndex} 吗？\n\n这个操作会直接修改原始数据，无法撤销！`)) {
+        return;
+    }
+    
+    // Call the API
+    fetch(`/api/delete_frame/{{ episode_idx }}/${frameIndex}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`${data.message}\n剩余 ${data.remaining_frames} 帧`);
+            // Reload the page to reflect changes
+            window.location.reload();
+        } else {
+            alert(`删除失败: ${data.error}`);
+        }
+    })
+    .catch(error => {
+        alert(`请求失败: ${error}`);
+    });
+}
+
+// Mark start frame for range deletion
+function markStartFrame() {
+    startFrameIndex = currentFrameIndex;
+    updateRangeDisplay();
+    
+    // If end is set and less than start, clear end
+    if (endFrameIndex !== null && endFrameIndex < startFrameIndex) {
+        endFrameIndex = null;
+        updateRangeDisplay();
+    }
+}
+
+// Mark end frame for range deletion
+function markEndFrame() {
+    endFrameIndex = currentFrameIndex;
+    updateRangeDisplay();
+    
+    // If start is set and greater than end, clear start
+    if (startFrameIndex !== null && startFrameIndex > endFrameIndex) {
+        startFrameIndex = null;
+        updateRangeDisplay();
+    }
+}
+
+// Update range display
+function updateRangeDisplay() {
+    const display = document.getElementById('range-display');
+    if (startFrameIndex === null && endFrameIndex === null) {
+        display.textContent = '未选择范围';
+        display.style.color = '#666';
+    } else if (startFrameIndex !== null && endFrameIndex !== null) {
+        const frameCount = Math.abs(endFrameIndex - startFrameIndex) + 1;
+        const startTime = frameTimestamps[startFrameIndex];
+        const endTime = frameTimestamps[endFrameIndex];
+        const duration = Math.abs(endTime - startTime);
+        display.textContent = `已选择: 帧 ${startFrameIndex} - ${endFrameIndex} (${frameCount} 帧, ${duration.toFixed(2)}秒)`;
+        display.style.color = '#dc3545';
+        display.style.fontWeight = 'bold';
+    } else if (startFrameIndex !== null) {
+        display.textContent = `起始帧: ${startFrameIndex} (请标记结束帧)`;
+        display.style.color = '#17a2b8';
+    } else {
+        display.textContent = `结束帧: ${endFrameIndex} (请标记起始帧)`;
+        display.style.color = '#17a2b8';
+    }
+}
+
+// Delete frame range
+function deleteFrameRange() {
+    if (startFrameIndex === null || endFrameIndex === null) {
+        alert('请先标记起始帧和结束帧');
+        return;
+    }
+    
+    const minFrame = Math.min(startFrameIndex, endFrameIndex);
+    const maxFrame = Math.max(startFrameIndex, endFrameIndex);
+    const frameCount = maxFrame - minFrame + 1;
+    
+    // Confirm deletion
+    if (!confirm(`确定要删除帧 ${minFrame} 到 ${maxFrame} 吗？\n\n共 ${frameCount} 帧\n这个操作会直接修改原始数据，无法撤销！`)) {
+        return;
+    }
+    
+    // Call the API
+    fetch(`/api/delete_frame_range/{{ episode_idx }}/${minFrame}/${maxFrame}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`${data.message}\n剩余 ${data.remaining_frames} 帧`);
+            // Reload the page to reflect changes
+            window.location.reload();
+        } else {
+            alert(`删除失败: ${data.error}`);
+        }
+    })
+    .catch(error => {
+        alert(`请求失败: ${error}`);
+    });
+}
+
 // 监听视频结束事件,自动停止在结束时间
 document.addEventListener('DOMContentLoaded', function() {
     const videos = document.querySelectorAll('.video-player');
@@ -225,9 +453,45 @@ document.addEventListener('DOMContentLoaded', function() {
             video.addEventListener('timeupdate', function() {
                 if (video.currentTime >= parseFloat(endTime)) {
                     video.pause();
+                    // Update button state when video reaches end
+                    const playPauseBtn = document.getElementById('play-pause-btn');
+                    if (playPauseBtn) {
+                        playPauseBtn.textContent = '▶️ 原视频';
+                        playPauseBtn.style.background = '#6c757d';
+                        isPlaying = false;
+                    }
                 }
             });
         }
+        
+        // Listen to play/pause events to sync button state
+        video.addEventListener('play', function() {
+            // Check if all videos are playing
+            const allVideos = document.querySelectorAll('.video-player');
+            const allPlaying = allVideos.every(v => !v.paused);
+            if (allPlaying && !isPlaying) {
+                const playPauseBtn = document.getElementById('play-pause-btn');
+                if (playPauseBtn) {
+                    playPauseBtn.textContent = '⏸️ 原视频';
+                    playPauseBtn.style.background = '#dc3545';
+                    isPlaying = true;
+                }
+            }
+        });
+        
+        video.addEventListener('pause', function() {
+            // Check if all videos are paused
+            const allVideos = document.querySelectorAll('.video-player');
+            const allPaused = allVideos.every(v => v.paused);
+            if (allPaused && isPlaying) {
+                const playPauseBtn = document.getElementById('play-pause-btn');
+                if (playPauseBtn) {
+                    playPauseBtn.textContent = '▶️ 原视频';
+                    playPauseBtn.style.background = '#6c757d';
+                    isPlaying = false;
+                }
+            }
+        });
     });
 
     // Frame selector event listener
@@ -245,6 +509,251 @@ document.addEventListener('DOMContentLoaded', function() {
             currentFrameIndex = frameIndex;
         });
     }
+});
+</script>
+
+<div id="joint-chart-container" style="margin: 30px 0;">
+    <h3>📊 关节角度变化</h3>
+    <div style="width: 100%; height: 300px; position: relative;">
+        <canvas id="joint-chart"></canvas>
+    </div>
+    <div id="chart-loading" style="text-align: center; padding: 20px; color: #666;">
+        正在加载关节角度数据...
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@2.2.1/dist/chartjs-plugin-annotation.min.js"></script>
+<script>
+// Load joint angle data and render chart
+let jointChart = null;
+let currentMarkerFrame = 0;
+
+function loadJointAngles() {
+    fetch('/api/joint_angles/{{ episode_idx }}')
+        .then(response => response.json())
+        .then(data => {
+            const loadingDiv = document.getElementById('chart-loading');
+            
+            if (!data.success) {
+                loadingDiv.textContent = '加载失败: ' + data.error;
+                loadingDiv.style.color = 'red';
+                return;
+            }
+            
+            if (!data.joint_angles || Object.keys(data.joint_angles).length === 0) {
+                loadingDiv.textContent = '没有找到关节角度数据';
+                loadingDiv.style.color = '#666';
+                return;
+            }
+            
+            // Hide loading message
+            loadingDiv.style.display = 'none';
+            
+            // Render chart
+            renderJointChart(data.joint_angles, data.total_frames);
+        })
+        .catch(error => {
+            const loadingDiv = document.getElementById('chart-loading');
+            loadingDiv.textContent = '请求失败: ' + error;
+            loadingDiv.style.color = 'red';
+        });
+}
+
+function updateChartMarker(frameIndex) {
+    if (!jointChart || !jointChart.options || !jointChart.options.plugins || !jointChart.options.plugins.annotation) {
+        return;
+    }
+    
+    currentMarkerFrame = frameIndex;
+    
+    // Update the vertical line annotation
+    try {
+        const annotation = jointChart.options.plugins.annotation.annotations.currentFrame;
+        if (annotation) {
+            annotation.xMin = frameIndex;
+            annotation.xMax = frameIndex;
+            jointChart.update('none'); // Update without animation
+        }
+    } catch (error) {
+        console.warn('Failed to update chart marker:', error);
+    }
+}
+
+function renderJointChart(jointAngles, totalFrames) {
+    const canvas = document.getElementById('joint-chart');
+    const ctx = canvas.getContext('2d');
+    
+    // Destroy previous chart if exists
+    if (jointChart) {
+        jointChart.destroy();
+    }
+    
+    // Prepare data
+    const datasets = [];
+    const colors = {
+        'left': {
+            border: 'rgb(54, 162, 235)',
+            background: 'rgba(54, 162, 235, 0.1)'
+        },
+        'right': {
+            border: 'rgb(255, 99, 132)',
+            background: 'rgba(255, 99, 132, 0.1)'
+        },
+        'unknown': {
+            border: 'rgb(75, 192, 192)',
+            background: 'rgba(75, 192, 192, 0.1)'
+        }
+    };
+    
+    let colorIndex = 0;
+    const colorPalette = [
+        'rgb(54, 162, 235)',   // Blue
+        'rgb(255, 99, 132)',   // Red
+        'rgb(255, 159, 64)',   // Orange
+        'rgb(75, 192, 192)',   // Teal
+        'rgb(153, 102, 255)',  // Purple
+        'rgb(255, 205, 86)',   // Yellow
+        'rgb(201, 203, 207)',  // Grey
+        'rgb(83, 102, 255)'    // Indigo
+    ];
+    
+    for (const [colName, colData] of Object.entries(jointAngles)) {
+        const values = colData.values;
+        const armType = colData.arm_type;
+        
+        // Determine color based on arm type
+        let color;
+        if (armType === 'left') {
+            color = colors.left.border;
+        } else if (armType === 'right') {
+            color = colors.right.border;
+        } else {
+            color = colorPalette[colorIndex % colorPalette.length];
+            colorIndex++;
+        }
+        
+        // If values are arrays (multiple joints), plot each joint separately
+        if (values[0] && Array.isArray(values[0])) {
+            const numJoints = values[0].length;
+            for (let i = 0; i < numJoints; i++) {
+                const jointValues = values.map(v => v[i]);
+                
+                datasets.push({
+                    label: `${colName} - Joint ${i+1}`,
+                    data: jointValues,
+                    borderColor: color,
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    tension: 0.1
+                });
+            }
+        } else {
+            // Single value per frame
+            datasets.push({
+                label: colName,
+                data: values,
+                borderColor: color,
+                backgroundColor: 'transparent',
+                borderWidth: 1.5,
+                pointRadius: 0,
+                tension: 0.1
+            });
+        }
+    }
+    
+    // Create chart
+    jointChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: Array.from({length: totalFrames}, (_, i) => i),
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: {
+                duration: 0 // Disable animation for marker updates
+            },
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            plugins: {
+                title: {
+                    display: true,
+                    text: '关节角度随时间变化 (左臂-蓝色，右臂-红色)',
+                    font: {
+                        size: 14
+                    }
+                },
+                legend: {
+                    display: true,
+                    position: 'top',
+                    labels: {
+                        usePointStyle: true,
+                        font: {
+                            size: 11
+                        }
+                    }
+                },
+                tooltip: {
+                    enabled: true,
+                    mode: 'index',
+                    intersect: false
+                },
+                annotation: {
+                    annotations: {
+                        currentFrame: {
+                            type: 'line',
+                            xMin: 0,
+                            xMax: 0,
+                            borderColor: 'rgb(255, 0, 0)',
+                            borderWidth: 2,
+                            display: true,
+                            label: {
+                                display: true,
+                                content: '当前帧',
+                                position: 'start',
+                                backgroundColor: 'rgba(255, 0, 0, 0.8)',
+                                font: {
+                                    size: 10
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    display: true,
+                    title: {
+                        display: true,
+                        text: '帧索引'
+                    }
+                },
+                y: {
+                    display: true,
+                    title: {
+                        display: true,
+                        text: '角度 (rad)'
+                    }
+                }
+            }
+        }
+    });
+    
+    // Hide loading message
+    const loadingDiv = document.getElementById('chart-loading');
+    if (loadingDiv) {
+        loadingDiv.style.display = 'none';
+    }
+}
+
+// Load joint angles when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    loadJointAngles();
 });
 </script>
 
