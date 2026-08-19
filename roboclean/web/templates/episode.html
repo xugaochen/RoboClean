@@ -73,7 +73,7 @@
             id="video-{{ loop.index }}"
             class="video-player"
             controls
-            preload="metadata"
+            preload="auto"
             {% if video_info.type == "chunk" %}
             data-start-time="{{ video_info.start_time }}"
             data-end-time="{{ video_info.end_time }}"
@@ -105,6 +105,22 @@ let endFrameIndex = null;
 
 // Play state tracking
 let isPlaying = false;
+
+// 预加载视频：在页面加载后异步预加载视频数据
+document.addEventListener('DOMContentLoaded', function() {
+    const videos = document.querySelectorAll('.video-player');
+
+    // 延迟预加载，避免阻塞页面渲染
+    setTimeout(() => {
+        videos.forEach(video => {
+            // 对于v3.0视频，提前跳转到起始时间
+            const startTime = video.getAttribute('data-start-time');
+            if (startTime) {
+                video.currentTime = parseFloat(startTime);
+            }
+        });
+    }, 500); // 等待500ms后开始预加载
+});
 
 // Toggle play/pause for all videos
 function togglePlayPause() {

@@ -1,5 +1,5 @@
 # Demo data directories
-demo_data*/
+demo*/
 
 # Python
 __pycache__/

@@ -39,6 +39,7 @@ class LeRobotDatasetLoader:
         self.info: Dict[str, Any] = {}
         self.episodes: List[Dict[str, Any]] = []
         self.version: str = ""
+        self._data_cache: Optional[pq.Table] = None  # Cache for v3.0 data
         self._load_metadata()
 
     def _load_metadata(self) -> None:
@@ -237,35 +238,66 @@ class LeRobotDatasetLoader:
 
         # For v3.0, the file may contain multiple episodes, so we need to filter
         if self.version == "v3.0":
-            # Load full table first
-            full_table = pq.read_table(episode_path, columns=columns)
+            # Use cached data if available
+            if self._data_cache is None:
+                # Load and cache the full table
+                self._data_cache = pq.read_table(episode_path)
 
-            # Filter by episode_index
-            if 'episode_index' not in full_table.column_names:
-                # If episode_index column not loaded, add it
-                full_table_with_idx = pq.read_table(episode_path, columns=['episode_index'])
-                episode_indices = full_table_with_idx['episode_index'].to_pylist()
+            full_table = self._data_cache
 
-                # Find rows for this episode
+            # If specific columns requested, select from cached table
+            if columns:
                 import pyarrow as pa
-                import numpy as np
-                mask = pa.array([idx == episode_index for idx in episode_indices])
-
-                # Combine tables
-                if columns:
-                    full_table = full_table
+                # Check if episode_index is in requested columns
+                if 'episode_index' not in columns:
+                    columns_with_idx = columns + ['episode_index']
+                    temp_table = full_table.select(columns_with_idx)
                 else:
-                    full_table = pq.read_table(episode_path)
+                    temp_table = full_table.select(columns)
+                    columns_with_idx = columns
 
-                return full_table.filter(mask)
+                # Filter by episode_index
+                mask = pa.compute.equal(temp_table['episode_index'], pa.scalar(episode_index))
+                result = temp_table.filter(mask)
+
+                # Remove episode_index from result if not requested
+                if 'episode_index' not in columns:
+                    result = result.select(columns)
+
+                return result
             else:
-                # episode_index is already in columns
+                # Load all columns, filter by episode_index
                 import pyarrow as pa
                 mask = pa.compute.equal(full_table['episode_index'], pa.scalar(episode_index))
                 return full_table.filter(mask)
         else:
             # For v2.x, each file contains exactly one episode
             return pq.read_table(episode_path, columns=columns)
+
+    def get_episode_lengths_batch(self) -> Dict[int, int]:
+        """Get frame counts for all episodes efficiently (v3.0 only).
+
+        Returns:
+            Dictionary mapping episode_index to frame count
+        """
+        if self.version != "v3.0":
+            # Fallback for v2.x: use metadata
+            return {i: ep.get("length", 0) for i, ep in enumerate(self.episodes)}
+
+        # For v3.0, read episode_index column once
+        episode_path = self.get_episode_path(0)
+        if not episode_path.exists():
+            return {i: ep.get("length", 0) for i, ep in enumerate(self.episodes)}
+
+        table = pq.read_table(episode_path, columns=['episode_index'])
+        ep_indices = table['episode_index'].to_pylist()
+
+        # Count frames per episode
+        lengths = {}
+        for ep_idx in range(len(self.episodes)):
+            lengths[ep_idx] = sum(1 for idx in ep_indices if idx == ep_idx)
+
+        return lengths
 
     def load_episode_as_numpy(
         self, episode_index: int, columns: Optional[List[str]] = None

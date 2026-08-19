@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据清洗 - RoboClean</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .clean-form {
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .form-group input[type="text"],
+        .form-group input[type="number"],
+        .form-group select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .form-group input[type="checkbox"] {
+            margin-right: 8px;
+        }
+
+        .form-group small {
+            display: block;
+            margin-top: 5px;
+            color: #666;
+            font-size: 12px;
+        }
+
+        .btn-clean {
+            background: #007bff;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+
+        .btn-clean:hover {
+            background: #0056b3;
+        }
+
+        .btn-cancel {
+            background: #6c757d;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn-cancel:hover {
+            background: #545b62;
+        }
+
+        .progress-container {
+            display: none;
+            margin-top: 20px;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #007bff, #0056b3);
+            width: 0%;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+
+        .progress-log {
+            max-height: 200px;
+            overflow-y: auto;
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+
+        .result-container {
+            display: none;
+            margin-top: 20px;
+            padding: 20px;
+            background: #d4edda;
+            border-radius: 8px;
+            border: 1px solid #c3e6cb;
+        }
+
+        .result-container.error {
+            background: #f8d7da;
+            border-color: #f5c6cb;
+        }
+
+        .dataset-info {
+            background: white;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+
+        .dataset-info h3 {
+            margin-top: 0;
+            color: #007bff;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .info-row:last-child {
+            border-bottom: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <nav class="navbar">
+            <a href="{{ url_for('index') }}">🏠 首页</a>
+            <a href="{{ url_for('clean_page') }}" class="active">🧹 数据清洗</a>
+        </nav>
+
+        <h1>🧹 数据清洗工具</h1>
+
+        <div class="dataset-info">
+            <h3>当前数据集</h3>
+            <div class="info-row">
+                <strong>路径:</strong>
+                <span>{{ dataset_path }}</span>
+            </div>
+            <div class="info-row">
+                <strong>Episodes:</strong>
+                <span>{{ dataset_info.get('total_episodes', '未知') }}</span>
+            </div>
+            <div class="info-row">
+                <strong>总帧数:</strong>
+                <span>{{ dataset_info.get('total_frames', '未知') }}</span>
+            </div>
+        </div>
+
+        <div class="clean-form">
+            <form id="cleanForm">
+                <div class="form-group">
+                    <label for="output_dir">输出目录名称 (可选)</label>
+                    <input type="text" id="output_dir" name="output_dir"
+                           placeholder="留空则自动在原目录后添加 _cleaned">
+                    <small>示例: my_cleaned_data 或 /path/to/output</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="threshold">运动阈值 (threshold)</label>
+                    <input type="number" id="threshold" name="threshold"
+                           value="0.01" step="0.001" min="0" max="1">
+                    <small>默认: 0.01。值越大，删除的静态帧越多</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="norm">归一化方法 (norm)</label>
+                    <select id="norm" name="norm">
+                        <option value="max" selected>max - 最大值归一化</option>
+                        <option value="l2">l2 - L2范数归一化</option>
+                    </select>
+                    <small>max: 比较最大差异; l2: 比较整体距离</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="compare_to">比较方法 (compare_to)</label>
+                    <select id="compare_to" name="compare_to">
+                        <option value="previous" selected>previous - 与前一帧比较</option>
+                        <option value="last-kept">last-kept - 与上一次保留的帧比较</option>
+                    </select>
+                    <small>previous: 连续帧比较; last-kept: 累积效果比较</small>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="drop_zero_rows" name="drop_zero_rows">
+                        删除全零行 (drop_zero_rows)
+                    </label>
+                    <small>删除运动列全为0的帧</small>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="drop_empty_episodes" name="drop_empty_episodes">
+                        删除空Episodes (drop_empty_episodes)
+                    </label>
+                    <small>清洗后如果某个episode为空，则删除整个episode</small>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="overwrite" name="overwrite">
+                        覆盖现有输出 (overwrite)
+                    </label>
+                    <small>如果输出目录已存在，是否覆盖</small>
+                </div>
+
+                <div style="margin-top: 30px;">
+                    <button type="submit" class="btn-clean">🚀 开始清洗</button>
+                    <a href="{{ url_for('index') }}" class="btn-cancel">取消</a>
+                </div>
+            </form>
+        </div>
+
+        <div id="progressContainer" class="progress-container">
+            <h3>清洗进度</h3>
+            <div class="progress-bar">
+                <div id="progressFill" class="progress-fill">0%</div>
+            </div>
+            <div id="progressLog" class="progress-log">准备开始...</div>
+        </div>
+
+        <div id="resultContainer" class="result-container">
+            <h3 id="resultTitle">✅ 清洗完成</h3>
+            <div id="resultContent"></div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('cleanForm');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressFill = document.getElementById('progressFill');
+        const progressLog = document.getElementById('progressLog');
+        const resultContainer = document.getElementById('resultContainer');
+        const resultTitle = document.getElementById('resultTitle');
+        const resultContent = document.getElementById('resultContent');
+
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            // Show progress
+            progressContainer.style.display = 'block';
+            resultContainer.style.display = 'none';
+            progressFill.style.width = '0%';
+            progressFill.textContent = '0%';
+            progressLog.textContent = '开始清洗...\n';
+
+            // Collect form data
+            const formData = new FormData(form);
+            const data = {
+                output_dir: formData.get('output_dir') || null,
+                threshold: parseFloat(formData.get('threshold')),
+                norm: formData.get('norm'),
+                compare_to: formData.get('compare_to'),
+                drop_zero_rows: formData.get('drop_zero_rows') === 'on',
+                drop_empty_episodes: formData.get('drop_empty_episodes') === 'on',
+                overwrite: formData.get('overwrite') === 'on'
+            };
+
+            try {
+                const response = await fetch('/api/clean', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    // Success
+                    progressFill.style.width = '100%';
+                    progressFill.textContent = '100%';
+                    progressLog.textContent += '\n清洗完成!\n';
+
+                    setTimeout(() => {
+                        resultContainer.style.display = 'block';
+                        resultContainer.classList.remove('error');
+                        resultTitle.textContent = '✅ 清洗完成';
+                        resultContent.innerHTML = `
+                            <p><strong>输出路径:</strong> ${result.output_path}</p>
+                            <p><strong>原始帧数:</strong> ${result.original_frames}</p>
+                            <p><strong>清洗后帧数:</strong> ${result.cleaned_frames}</p>
+                            <p><strong>删除帧数:</strong> ${result.dropped_frames}</p>
+                            <p><strong>保留率:</strong> ${result.retention_rate}%</p>
+                            <p style="margin-top: 15px;">
+                                <a href="/load?path=${encodeURIComponent(result.output_path)}"
+                                   class="btn-clean" style="text-decoration: none;">
+                                    查看清洗结果
+                                </a>
+                            </p>
+                        `;
+                    }, 500);
+                } else {
+                    // Error
+                    progressLog.textContent += '\n错误: ' + result.error + '\n';
+                    resultContainer.style.display = 'block';
+                    resultContainer.classList.add('error');
+                    resultTitle.textContent = '❌ 清洗失败';
+                    resultContent.innerHTML = `<p>${result.error}</p>`;
+                }
+            } catch (error) {
+                progressLog.textContent += '\n网络错误: ' + error.message + '\n';
+                resultContainer.style.display = 'block';
+                resultContainer.classList.add('error');
+                resultTitle.textContent = '❌ 清洗失败';
+                resultContent.innerHTML = `<p>网络错误: ${error.message}</p>`;
+            }
+        });
+    </script>
+</body>
+</html>

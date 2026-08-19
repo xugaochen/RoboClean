@@ -25,13 +25,6 @@ def create_app(dataset_path: Optional[str] = None) -> Flask:
     app.config["DATASET_PATH"] = dataset_path
 
     loader: Optional[LeRobotDatasetLoader] = None
-    # Cache for homepage data
-    homepage_cache: Dict = {
-        "episode_lengths": None,
-        "original_episode_lengths": None,
-        "dataset_path": None,
-        "needs_refresh": True
-    }
 
     def get_loader() -> LeRobotDatasetLoader:
         """Get or create dataset loader."""
@@ -43,49 +36,6 @@ def create_app(dataset_path: Optional[str] = None) -> Flask:
             else:
                 raise ValueError("No dataset loaded. Please provide dataset_path.")
         return loader
-
-    def get_homepage_data() -> tuple:
-        """Get homepage data with caching."""
-        nonlocal homepage_cache, loader
-
-        current_path = app.config.get("DATASET_PATH")
-
-        # Check if cache is valid
-        if (not homepage_cache["needs_refresh"] and
-            homepage_cache["dataset_path"] == current_path and
-            homepage_cache["episode_lengths"] is not None):
-            return (
-                homepage_cache["episode_lengths"],
-                homepage_cache["original_episode_lengths"]
-            )
-
-        # Need to refresh cache
-        loader = get_loader()
-        episode_lengths = {}
-        original_episode_lengths = {}
-
-        # Use efficient batch method for v3.0
-        if loader.version == "v3.0":
-            try:
-                episode_lengths = loader.get_episode_lengths_batch()
-                for i, ep in enumerate(loader.episodes):
-                    original_episode_lengths[i] = ep.get("length", 0)
-            except Exception:
-                for i, ep in enumerate(loader.episodes):
-                    episode_lengths[i] = ep.get("length", 0)
-                    original_episode_lengths[i] = ep.get("length", 0)
-        else:
-            for i, ep in enumerate(loader.episodes):
-                episode_lengths[i] = ep.get("length", 0)
-                original_episode_lengths[i] = ep.get("length", 0)
-
-        # Update cache
-        homepage_cache["episode_lengths"] = episode_lengths
-        homepage_cache["original_episode_lengths"] = original_episode_lengths
-        homepage_cache["dataset_path"] = current_path
-        homepage_cache["needs_refresh"] = False
-
-        return episode_lengths, original_episode_lengths
 
     @app.route("/")
     def index():
@@ -101,8 +51,19 @@ def create_app(dataset_path: Optional[str] = None) -> Flask:
 
         try:
             loader_obj = get_loader()
-            # Use cached homepage data
-            episode_lengths, original_episode_lengths = get_homepage_data()
+            episode_lengths = {}
+            original_episode_lengths = {}
+            for i, ep in enumerate(loader_obj.episodes):
+                # Use cleaned frame count (actual rows in parquet)
+                try:
+                    episode_table = loader_obj.load_episode(i)
+                    episode_lengths[i] = episode_table.num_rows
+                except Exception:
+                    # Fallback to metadata if loading fails
+                    episode_lengths[i] = ep.get("length", 0)
+
+                # Store original video frame count from metadata
+                original_episode_lengths[i] = ep.get("length", 0)
 
             return render_template(
                 "index.html",
@@ -134,17 +95,31 @@ def create_app(dataset_path: Optional[str] = None) -> Flask:
             if not path.exists():
                 return render_template("error.html", error=f"路径不存在: {dataset_path}")
 
-            # Update dataset path and mark cache as needing refresh
+            # Load dataset
+            nonlocal loader
+            loader = LeRobotDatasetLoader(dataset_path)
             app.config["DATASET_PATH"] = dataset_path
 
-            # Force refresh for new dataset
-            nonlocal loader, homepage_cache
-            loader = None  # Reset loader for new dataset
-            homepage_cache["needs_refresh"] = True
+            # Optimized: Use batch loading for v3.0 datasets
+            episode_lengths = {}
+            original_episode_lengths = {}
 
-            # Load dataset and get cached data
-            loader = get_loader()
-            episode_lengths, original_episode_lengths = get_homepage_data()
+            # Use efficient batch method for v3.0
+            if loader.version == "v3.0":
+                try:
+                    episode_lengths = loader.get_episode_lengths_batch()
+                    for i, ep in enumerate(loader.episodes):
+                        original_episode_lengths[i] = ep.get("length", 0)
+                except Exception:
+                    # Fallback to metadata on error
+                    for i, ep in enumerate(loader.episodes):
+                        episode_lengths[i] = ep.get("length", 0)
+                        original_episode_lengths[i] = ep.get("length", 0)
+            else:
+                # For v2.x, use metadata (fast enough)
+                for i, ep in enumerate(loader.episodes):
+                    episode_lengths[i] = ep.get("length", 0)
+                    original_episode_lengths[i] = ep.get("length", 0)
 
             return render_template(
                 "index.html",
@@ -399,14 +374,13 @@ def create_app(dataset_path: Optional[str] = None) -> Flask:
             info['total_frames'] = info.get('total_frames', 0) - 1
             with open(info_path, 'w') as f:
                 json.dump(info, f, indent=2)
-
+            
             # Reload loader to reflect changes
-            nonlocal loader, homepage_cache
+            nonlocal loader
             loader = LeRobotDatasetLoader(loader.dataset_root)
-            homepage_cache["needs_refresh"] = True  # Mark cache as needing refresh
-
+            
             return jsonify({
-                "success": True,
+                "success": True, 
                 "remaining_frames": len(keep_indices),
                 "message": f"已删除帧 {frame_idx}"
             })
@@ -510,14 +484,13 @@ def create_app(dataset_path: Optional[str] = None) -> Flask:
             info['total_frames'] = info.get('total_frames', 0) - deleted_count
             with open(info_path, 'w') as f:
                 json.dump(info, f, indent=2)
-
+            
             # Reload loader to reflect changes
-            nonlocal loader, homepage_cache
+            nonlocal loader
             loader = LeRobotDatasetLoader(loader.dataset_root)
-            homepage_cache["needs_refresh"] = True  # Mark cache as needing refresh
-
+            
             return jsonify({
-                "success": True,
+                "success": True, 
                 "remaining_frames": len(keep_indices),
                 "deleted_frames": deleted_count,
                 "message": f"已删除帧 {start_frame} 到 {end_frame}，共 {deleted_count} 帧"
